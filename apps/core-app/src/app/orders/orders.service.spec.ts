@@ -1,8 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import {
-  BadRequestException,
-  ConflictException,
-} from '@nestjs/common';
+import { BadRequestException, ConflictException } from '@nestjs/common';
 import { OrdersService } from './orders.service';
 import {
   PrismaService,
@@ -60,7 +57,24 @@ describe('OrdersService', () => {
     bookedCount: 5,
   };
 
-  let mockPrismaService: any;
+  type MockFn = jest.Mock;
+
+  interface MockPrismaService {
+    user: { findUnique: MockFn };
+    menuItem: { findMany: MockFn };
+    pickupSlot: { findUnique: MockFn };
+    order: {
+      findUnique: MockFn;
+      create: MockFn;
+      update: MockFn;
+      findMany: MockFn;
+    };
+    $transaction: MockFn;
+    $queryRaw: MockFn;
+    $executeRaw: MockFn;
+  }
+
+  let mockPrismaService: MockPrismaService;
 
   beforeEach(async () => {
     mockPrismaService = {
@@ -91,9 +105,11 @@ describe('OrdersService', () => {
         findMany: jest.fn(),
       },
       $transaction: jest.fn((callback) => callback(mockPrismaService)),
-      $queryRaw: jest.fn().mockResolvedValue([
-        { id: mockSlot.id, booked_count: 6, max_capacity: 15 },
-      ]),
+      $queryRaw: jest
+        .fn()
+        .mockResolvedValue([
+          { id: mockSlot.id, booked_count: 6, max_capacity: 15 },
+        ]),
       $executeRaw: jest.fn().mockResolvedValue(1),
     };
 

@@ -93,26 +93,26 @@ describe('SlotsService', () => {
       // Check slot-1130: 2/15 booked -> EXPRESS
       const slot1130 = result.slots.find(
         (s: FormattedSlotResponse) => s.id === 'slot-1130',
-      )!;
-      expect(slot1130.congestionBadge).toBe(SlotCongestionBadge.EXPRESS);
-      expect(slot1130.remainingCapacity).toBe(13);
-      expect(slot1130.isSelectable).toBe(true);
+      );
+      expect(slot1130?.congestionBadge).toBe(SlotCongestionBadge.EXPRESS);
+      expect(slot1130?.remainingCapacity).toBe(13);
+      expect(slot1130?.isSelectable).toBe(true);
 
       // Check slot-1140: 12/15 booked -> FILLING_FAST
       const slot1140 = result.slots.find(
         (s: FormattedSlotResponse) => s.id === 'slot-1140',
-      )!;
-      expect(slot1140.congestionBadge).toBe(SlotCongestionBadge.FILLING_FAST);
-      expect(slot1140.remainingCapacity).toBe(3);
-      expect(slot1140.isSelectable).toBe(true);
+      );
+      expect(slot1140?.congestionBadge).toBe(SlotCongestionBadge.FILLING_FAST);
+      expect(slot1140?.remainingCapacity).toBe(3);
+      expect(slot1140?.isSelectable).toBe(true);
 
       // Check slot-1150: 15/15 booked -> SLOT_FULL
       const slot1150 = result.slots.find(
         (s: FormattedSlotResponse) => s.id === 'slot-1150',
-      )!;
-      expect(slot1150.congestionBadge).toBe(SlotCongestionBadge.SLOT_FULL);
-      expect(slot1150.remainingCapacity).toBe(0);
-      expect(slot1150.isSelectable).toBe(false);
+      );
+      expect(slot1150?.congestionBadge).toBe(SlotCongestionBadge.SLOT_FULL);
+      expect(slot1150?.remainingCapacity).toBe(0);
+      expect(slot1150?.isSelectable).toBe(false);
     });
   });
 
@@ -124,9 +124,9 @@ describe('SlotsService', () => {
 
       const slot1130 = result.slots.find(
         (s: FormattedSlotResponse) => s.id === 'slot-1130',
-      )!;
-      expect(slot1130.isClosed).toBe(true);
-      expect(slot1130.isSelectable).toBe(false);
+      );
+      expect(slot1130?.isClosed).toBe(true);
+      expect(slot1130?.isSelectable).toBe(false);
 
       // slot-1140 is open but FILLING_FAST; slot-1200 is open and EXPRESS
       // Since earliest EXPRESS priority applies, slot-1200 is recommended!

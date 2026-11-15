@@ -11,6 +11,8 @@ import {
   BadRequestException,
   ConflictException,
   NotFoundException,
+  Type,
+  Provider,
 } from '@nestjs/common';
 
 // Services under test
@@ -31,6 +33,7 @@ import {
   Role,
   calculateSlotBadge,
   SlotCongestionBadge,
+  PickupSlot,
 } from '@micro/core';
 import {
   ORDER_FIRED_EVENT,
@@ -51,12 +54,46 @@ import { Job } from 'bullmq';
 
 // ─── Shared mocks ─────────────────────────────────────────────────────────────
 
-const mockPrisma: any = {
+type MockFn = jest.Mock;
+
+interface MockPrismaClient {
+  user: { findUnique: MockFn };
+  menuItem: { findUnique: MockFn; findMany: MockFn; update: MockFn };
+  pickupSlot: {
+    findUnique: MockFn;
+    findMany: MockFn;
+    update: MockFn;
+    upsert: MockFn;
+  };
+  order: {
+    findUnique: MockFn;
+    findMany: MockFn;
+    create: MockFn;
+    update: MockFn;
+  };
+  $transaction: MockFn;
+  $queryRaw: MockFn;
+  $executeRaw: MockFn;
+}
+
+const mockPrisma: MockPrismaClient = {
   user: { findUnique: jest.fn() },
   menuItem: { findUnique: jest.fn(), findMany: jest.fn(), update: jest.fn() },
-  pickupSlot: { findUnique: jest.fn(), findMany: jest.fn(), update: jest.fn(), upsert: jest.fn() },
-  order: { findUnique: jest.fn(), findMany: jest.fn(), create: jest.fn(), update: jest.fn() },
-  $transaction: jest.fn((cb: (tx: any) => any) => cb(mockPrisma)),
+  pickupSlot: {
+    findUnique: jest.fn(),
+    findMany: jest.fn(),
+    update: jest.fn(),
+    upsert: jest.fn(),
+  },
+  order: {
+    findUnique: jest.fn(),
+    findMany: jest.fn(),
+    create: jest.fn(),
+    update: jest.fn(),
+  },
+  $transaction: jest.fn((cb: (tx: MockPrismaClient) => unknown) =>
+    cb(mockPrisma),
+  ),
   $queryRaw: jest.fn(),
   $executeRaw: jest.fn(),
 };
@@ -86,8 +123,18 @@ const MENU_ITEM = {
   pickupZone: PickupZone.SHELF_A,
   isAvailable: true,
   modifiersSchema: [
-    { id: 'rice', name: 'Rice Base', required: true, options: ['Jasmine', 'Brown'] },
-    { id: 'spice', name: 'Spice Level', required: false, options: ['Mild', 'Spicy'] },
+    {
+      id: 'rice',
+      name: 'Rice Base',
+      required: true,
+      options: ['Jasmine', 'Brown'],
+    },
+    {
+      id: 'spice',
+      name: 'Spice Level',
+      required: false,
+      options: ['Mild', 'Spicy'],
+    },
   ],
 };
 
@@ -112,12 +159,16 @@ const VALID_ORDER_DTO = {
   ],
 };
 
-const makeJob = (data: any, name: string) => ({ name, data } as unknown as Job<any>);
+const makeJob = <T>(data: T, name: string) =>
+  ({ name, data }) as unknown as Job<T>;
 
 // ─── Helper: build module ────────────────────────────────────────────────────
 
-async function buildModule(Service: any, extraProviders: any[] = []) {
-  const providers: any[] = [
+async function buildModule<T>(
+  Service: Type<T>,
+  extraProviders: Provider[] = [],
+) {
+  const providers: Provider[] = [
     Service,
     { provide: PrismaService, useValue: mockPrisma },
     { provide: EventEmitter2, useValue: mockEventEmitter },
@@ -126,7 +177,10 @@ async function buildModule(Service: any, extraProviders: any[] = []) {
   ];
 
   if (Service !== SchedulerService) {
-    providers.push({ provide: SchedulerService, useValue: mockSchedulerService });
+    providers.push({
+      provide: SchedulerService,
+      useValue: mockSchedulerService,
+    });
   }
 
   providers.push(...extraProviders);
@@ -153,7 +207,10 @@ describe('[PRD §2 — Epic 2] Menu & Modifiers', () => {
   describe('US-2.3: Real-Time Stock Sync', () => {
     it('toggleItemStock(id, false) marks item unavailable — 86 from ordering', async () => {
       mockPrisma.menuItem.findUnique.mockResolvedValue(MENU_ITEM);
-      mockPrisma.menuItem.update.mockResolvedValue({ ...MENU_ITEM, isAvailable: false });
+      mockPrisma.menuItem.update.mockResolvedValue({
+        ...MENU_ITEM,
+        isAvailable: false,
+      });
 
       const result = await menuService.toggleItemStock(MENU_ITEM.id, false);
 
@@ -165,7 +222,9 @@ describe('[PRD §2 — Epic 2] Menu & Modifiers', () => {
 
     it('toggleItemStock throws NotFoundException for unknown item', async () => {
       mockPrisma.menuItem.findUnique.mockResolvedValue(null);
-      await expect(menuService.toggleItemStock('bad-id', false)).rejects.toThrow(NotFoundException);
+      await expect(
+        menuService.toggleItemStock('bad-id', false),
+      ).rejects.toThrow(NotFoundException);
     });
   });
 
@@ -183,15 +242,17 @@ describe('[PRD §2 — Epic 2] Menu & Modifiers', () => {
 
       const dtoMissingModifier = {
         ...VALID_ORDER_DTO,
-        items: [{ menuItemId: MENU_ITEM.id, quantity: 1, selectedModifiers: {} }],
+        items: [
+          { menuItemId: MENU_ITEM.id, quantity: 1, selectedModifiers: {} },
+        ],
       };
 
-      await expect(ordersService.createOrder(dtoMissingModifier)).rejects.toThrow(
-        BadRequestException,
-      );
-      await expect(ordersService.createOrder(dtoMissingModifier)).rejects.toThrow(
-        /required/i,
-      );
+      await expect(
+        ordersService.createOrder(dtoMissingModifier),
+      ).rejects.toThrow(BadRequestException);
+      await expect(
+        ordersService.createOrder(dtoMissingModifier),
+      ).rejects.toThrow(/required/i);
     });
 
     it('rejects order when modifier value is not in allowed options', async () => {
@@ -209,18 +270,20 @@ describe('[PRD §2 — Epic 2] Menu & Modifiers', () => {
         ],
       };
 
-      await expect(ordersService.createOrder(dtoInvalidModifier)).rejects.toThrow(
-        BadRequestException,
-      );
-      await expect(ordersService.createOrder(dtoInvalidModifier)).rejects.toThrow(
-        /invalid option/i,
-      );
+      await expect(
+        ordersService.createOrder(dtoInvalidModifier),
+      ).rejects.toThrow(BadRequestException);
+      await expect(
+        ordersService.createOrder(dtoInvalidModifier),
+      ).rejects.toThrow(/invalid option/i);
     });
 
     it('accepts order when all modifiers are from allowed options', async () => {
       mockPrisma.user.findUnique.mockResolvedValue(USER);
       mockPrisma.menuItem.findMany.mockResolvedValue([MENU_ITEM]);
-      mockPrisma.$queryRaw.mockResolvedValue([{ id: SLOT_1H_FUTURE.id, booked_count: 6, max_capacity: 15 }]);
+      mockPrisma.$queryRaw.mockResolvedValue([
+        { id: SLOT_1H_FUTURE.id, booked_count: 6, max_capacity: 15 },
+      ]);
       mockPrisma.pickupSlot.findUnique.mockResolvedValue(SLOT_1H_FUTURE);
       mockPrisma.order.create.mockResolvedValue({
         id: 'new-order',
@@ -237,10 +300,16 @@ describe('[PRD §2 — Epic 2] Menu & Modifiers', () => {
 
     it('rejects order for a sold-out item (US-2.3 ↔ US-2.2 guard)', async () => {
       mockPrisma.user.findUnique.mockResolvedValue(USER);
-      mockPrisma.menuItem.findMany.mockResolvedValue([{ ...MENU_ITEM, isAvailable: false }]);
+      mockPrisma.menuItem.findMany.mockResolvedValue([
+        { ...MENU_ITEM, isAvailable: false },
+      ]);
 
-      await expect(ordersService.createOrder(VALID_ORDER_DTO)).rejects.toThrow(BadRequestException);
-      await expect(ordersService.createOrder(VALID_ORDER_DTO)).rejects.toThrow(/sold out/i);
+      await expect(ordersService.createOrder(VALID_ORDER_DTO)).rejects.toThrow(
+        BadRequestException,
+      );
+      await expect(ordersService.createOrder(VALID_ORDER_DTO)).rejects.toThrow(
+        /sold out/i,
+      );
     });
   });
 });
@@ -253,7 +322,7 @@ describe('[PRD §3 — Epic 3] Pickup Slot Engine', () => {
   describe('US-3.2 Congestion Badge thresholds (calculateSlotBadge — @micro/core)', () => {
     it('returns EXPRESS when utilization < 75%  (PRD: Green — plenty of capacity)', () => {
       expect(calculateSlotBadge(0, 15)).toBe(SlotCongestionBadge.EXPRESS);
-      expect(calculateSlotBadge(5, 15)).toBe(SlotCongestionBadge.EXPRESS);  // 33%
+      expect(calculateSlotBadge(5, 15)).toBe(SlotCongestionBadge.EXPRESS); // 33%
       expect(calculateSlotBadge(11, 15)).toBe(SlotCongestionBadge.EXPRESS); // 73%
     });
 
@@ -272,7 +341,7 @@ describe('[PRD §3 — Epic 3] Pickup Slot Engine', () => {
   describe('US-3.1 + US-3.2: SlotsService — slot formatting & recommendation', () => {
     let slotsService: SlotsService;
 
-    const makeSlot = (overrides: any) => ({
+    const makeSlot = (overrides: Partial<PickupSlot> = {}) => ({
       id: `slot-${Math.random()}`,
       serviceDate: new Date(),
       startTime: new Date(Date.now() + 2 * 60 * 60 * 1000), // 2 hours away
@@ -289,7 +358,11 @@ describe('[PRD §3 — Epic 3] Pickup Slot Engine', () => {
     });
 
     it('returns EXPRESS badge and isSelectable=true for a low-utilization slot', async () => {
-      const slot = makeSlot({ id: 'express-slot', bookedCount: 3, maxCapacity: 15 });
+      const slot = makeSlot({
+        id: 'express-slot',
+        bookedCount: 3,
+        maxCapacity: 15,
+      });
       mockPrisma.pickupSlot.findMany.mockResolvedValue([slot]);
 
       const result = await slotsService.getTodaySlots();
@@ -305,7 +378,9 @@ describe('[PRD §3 — Epic 3] Pickup Slot Engine', () => {
       mockPrisma.pickupSlot.findMany.mockResolvedValue([slot]);
 
       const result = await slotsService.getTodaySlots();
-      expect(result.slots[0].congestionBadge).toBe(SlotCongestionBadge.FILLING_FAST);
+      expect(result.slots[0].congestionBadge).toBe(
+        SlotCongestionBadge.FILLING_FAST,
+      );
       expect(result.slots[0].isSelectable).toBe(true);
     });
 
@@ -314,7 +389,9 @@ describe('[PRD §3 — Epic 3] Pickup Slot Engine', () => {
       mockPrisma.pickupSlot.findMany.mockResolvedValue([slot]);
 
       const result = await slotsService.getTodaySlots();
-      expect(result.slots[0].congestionBadge).toBe(SlotCongestionBadge.SLOT_FULL);
+      expect(result.slots[0].congestionBadge).toBe(
+        SlotCongestionBadge.SLOT_FULL,
+      );
       expect(result.slots[0].isSelectable).toBe(false);
     });
 
@@ -325,7 +402,10 @@ describe('[PRD §3 — Epic 3] Pickup Slot Engine', () => {
         bookedCount: 2,
         startTime: new Date(Date.now() + 3 * 60 * 60 * 1000), // later
       });
-      mockPrisma.pickupSlot.findMany.mockResolvedValue([fillingSlot, expressSlot]);
+      mockPrisma.pickupSlot.findMany.mockResolvedValue([
+        fillingSlot,
+        expressSlot,
+      ]);
 
       const result = await slotsService.getTodaySlots();
       // PRD US-3.2: pre-selects earliest available LOW-CONGESTION slot
@@ -380,8 +460,12 @@ describe('[PRD §3 — Epic 3] Pickup Slot Engine', () => {
         startTime: new Date(Date.now() + 2 * 60 * 1000),
       });
 
-      await expect(ordersService.createOrder(VALID_ORDER_DTO)).rejects.toThrow(ConflictException);
-      await expect(ordersService.createOrder(VALID_ORDER_DTO)).rejects.toThrow(/SLOT_CLOSED/);
+      await expect(ordersService.createOrder(VALID_ORDER_DTO)).rejects.toThrow(
+        ConflictException,
+      );
+      await expect(ordersService.createOrder(VALID_ORDER_DTO)).rejects.toThrow(
+        /SLOT_CLOSED/,
+      );
     });
   });
 });
@@ -440,35 +524,71 @@ describe('[PRD §4 — Epic 4] JIT Kitchen Operations', () => {
 
     it('fireAt = slotStart - max(prepDurationMins) across all order items', async () => {
       const slotStart = new Date(Date.now() + 60 * 60 * 1000);
-      const longPrepItem = { ...MENU_ITEM, id: 'item-long', prepDurationMins: 10 };
-      const shortPrepItem = { ...MENU_ITEM, id: 'item-short', prepDurationMins: 2 };
+      const longPrepItem = {
+        ...MENU_ITEM,
+        id: 'item-long',
+        prepDurationMins: 10,
+      };
+      const shortPrepItem = {
+        ...MENU_ITEM,
+        id: 'item-short',
+        prepDurationMins: 2,
+      };
 
       mockPrisma.user.findUnique.mockResolvedValue(USER);
-      mockPrisma.menuItem.findMany.mockResolvedValue([longPrepItem, shortPrepItem]);
-      mockPrisma.pickupSlot.findUnique.mockResolvedValue({ ...SLOT_1H_FUTURE, startTime: slotStart });
-      mockPrisma.$queryRaw.mockResolvedValue([{ id: SLOT_1H_FUTURE.id, booked_count: 1, max_capacity: 15 }]);
+      mockPrisma.menuItem.findMany.mockResolvedValue([
+        longPrepItem,
+        shortPrepItem,
+      ]);
+      mockPrisma.pickupSlot.findUnique.mockResolvedValue({
+        ...SLOT_1H_FUTURE,
+        startTime: slotStart,
+      });
+      mockPrisma.$queryRaw.mockResolvedValue([
+        { id: SLOT_1H_FUTURE.id, booked_count: 1, max_capacity: 15 },
+      ]);
 
       let capturedFireAt: Date | null = null;
-      mockPrisma.order.create.mockImplementation(({ data }: any) => {
-        capturedFireAt = data.fireAt;
-        return Promise.resolve({
-          id: 'o1', pickupCode: '1111', status: OrderStatus.SCHEDULED,
-          fireAt: data.fireAt, slot: { startTime: slotStart }, orderItems: [],
-        });
-      });
+      mockPrisma.order.create.mockImplementation(
+        ({ data }: { data: { fireAt: Date } }) => {
+          capturedFireAt = data.fireAt;
+          return Promise.resolve({
+            id: 'o1',
+            pickupCode: '1111',
+            status: OrderStatus.SCHEDULED,
+            fireAt: data.fireAt,
+            slot: { startTime: slotStart },
+            orderItems: [],
+          });
+        },
+      );
 
       await ordersService.createOrder({
         userId: USER.id,
         slotId: SLOT_1H_FUTURE.id,
         items: [
-          { menuItemId: 'item-long', quantity: 1, selectedModifiers: { rice: 'Jasmine' } },
-          { menuItemId: 'item-short', quantity: 1, selectedModifiers: { rice: 'Jasmine' } },
+          {
+            menuItemId: 'item-long',
+            quantity: 1,
+            selectedModifiers: { rice: 'Jasmine' },
+          },
+          {
+            menuItemId: 'item-short',
+            quantity: 1,
+            selectedModifiers: { rice: 'Jasmine' },
+          },
         ],
       });
 
       // fireAt must be slotStart minus MAX prep (10 min), not min prep (2 min)
       const expectedFireAt = slotStart.getTime() - 10 * 60 * 1000;
-      expect(capturedFireAt!.getTime()).toBeCloseTo(expectedFireAt, -2);
+      expect(capturedFireAt).toBeDefined();
+      if (capturedFireAt) {
+        expect((capturedFireAt as Date).getTime()).toBeCloseTo(
+          expectedFireAt,
+          -2,
+        );
+      }
     });
   });
 
@@ -484,10 +604,30 @@ describe('[PRD §4 — Epic 4] JIT Kitchen Operations', () => {
     it('sums quantities of same item across multiple orders in a slot', async () => {
       mockPrisma.pickupSlot.findMany.mockResolvedValue([
         {
-          id: 'slot-1', startTime: new Date(), endTime: new Date(),
+          id: 'slot-1',
+          startTime: new Date(),
+          endTime: new Date(),
           orders: [
-            { status: OrderStatus.SCHEDULED, orderItems: [{ menuItemId: 'i1', quantity: 3, menuItem: { name: 'Bowl', category: Category.HOT_MEAL } }] },
-            { status: OrderStatus.PREPARING, orderItems: [{ menuItemId: 'i1', quantity: 2, menuItem: { name: 'Bowl', category: Category.HOT_MEAL } }] },
+            {
+              status: OrderStatus.SCHEDULED,
+              orderItems: [
+                {
+                  menuItemId: 'i1',
+                  quantity: 3,
+                  menuItem: { name: 'Bowl', category: Category.HOT_MEAL },
+                },
+              ],
+            },
+            {
+              status: OrderStatus.PREPARING,
+              orderItems: [
+                {
+                  menuItemId: 'i1',
+                  quantity: 2,
+                  menuItem: { name: 'Bowl', category: Category.HOT_MEAL },
+                },
+              ],
+            },
           ],
         },
       ]);
@@ -501,7 +641,8 @@ describe('[PRD §4 — Epic 4] JIT Kitchen Operations', () => {
       mockPrisma.pickupSlot.findMany.mockResolvedValue([]);
       await kdsService.getForecast();
 
-      const { where } = mockPrisma.pickupSlot.findMany.mock.calls[0][0].include.orders;
+      const { where } =
+        mockPrisma.pickupSlot.findMany.mock.calls[0][0].include.orders;
       expect(where.status.in).toContain(OrderStatus.SCHEDULED);
       expect(where.status.in).toContain(OrderStatus.PREPARING);
       expect(where.status.in).not.toContain(OrderStatus.COMPLETED);
@@ -519,7 +660,15 @@ describe('[PRD §4 — Epic 4] JIT Kitchen Operations', () => {
     });
 
     it('transitions SCHEDULED order to PREPARING and emits ticket_fired (order.fired)', async () => {
-      const order = { id: 'o1', pickupCode: '9999', userId: 'u1', slotId: 's1', pickupZone: PickupZone.SHELF_A, status: OrderStatus.SCHEDULED, slot: { startTime: new Date() } };
+      const order = {
+        id: 'o1',
+        pickupCode: '9999',
+        userId: 'u1',
+        slotId: 's1',
+        pickupZone: PickupZone.SHELF_A,
+        status: OrderStatus.SCHEDULED,
+        slot: { startTime: new Date() },
+      };
       mockPrisma.order.findUnique.mockResolvedValue(order);
 
       await processor.process(makeJob({ orderId: 'o1' }, JIT_FIRE_JOB));
@@ -534,7 +683,12 @@ describe('[PRD §4 — Epic 4] JIT Kitchen Operations', () => {
     });
 
     it('skips already-CANCELLED orders — guard against race condition', async () => {
-      mockPrisma.order.findUnique.mockResolvedValue({ id: 'o1', pickupCode: '0000', status: OrderStatus.CANCELLED, slot: { startTime: new Date() } });
+      mockPrisma.order.findUnique.mockResolvedValue({
+        id: 'o1',
+        pickupCode: '0000',
+        status: OrderStatus.CANCELLED,
+        slot: { startTime: new Date() },
+      });
 
       await processor.process(makeJob({ orderId: 'o1' }, JIT_FIRE_JOB));
 
@@ -565,10 +719,16 @@ describe('[PRD §5 — Epic 5] Live Order Lifecycle', () => {
       mockPrisma.user.findUnique.mockResolvedValue(USER);
       mockPrisma.menuItem.findMany.mockResolvedValue([MENU_ITEM]);
       mockPrisma.pickupSlot.findUnique.mockResolvedValue(SLOT_1H_FUTURE);
-      mockPrisma.$queryRaw.mockResolvedValue([{ id: SLOT_1H_FUTURE.id, booked_count: 1, max_capacity: 15 }]);
+      mockPrisma.$queryRaw.mockResolvedValue([
+        { id: SLOT_1H_FUTURE.id, booked_count: 1, max_capacity: 15 },
+      ]);
       mockPrisma.order.create.mockResolvedValue({
-        id: 'new-order', pickupCode: '5555', status: OrderStatus.SCHEDULED,
-        fireAt: new Date(), slot: { startTime: SLOT_1H_FUTURE.startTime }, orderItems: [],
+        id: 'new-order',
+        pickupCode: '5555',
+        status: OrderStatus.SCHEDULED,
+        fireAt: new Date(),
+        slot: { startTime: SLOT_1H_FUTURE.startTime },
+        orderItems: [],
       });
 
       const result = await ordersService.createOrder(VALID_ORDER_DTO);
@@ -582,33 +742,58 @@ describe('[PRD §5 — Epic 5] Live Order Lifecycle', () => {
 
     it('Stage 3 (READY_FOR_PICKUP): KdsService.markOrderReady transitions PREPARING → READY_FOR_PICKUP', async () => {
       const preparingOrder = {
-        id: 'o1', pickupCode: '4082', userId: 'u1', slotId: 's1',
-        pickupZone: PickupZone.SHELF_A, status: OrderStatus.PREPARING,
+        id: 'o1',
+        pickupCode: '4082',
+        userId: 'u1',
+        slotId: 's1',
+        pickupZone: PickupZone.SHELF_A,
+        status: OrderStatus.PREPARING,
         slot: { startTime: new Date() },
         user: { id: 'u1', employeeCode: 'EMP-001' },
       };
       mockPrisma.order.findUnique.mockResolvedValue(preparingOrder);
-      mockPrisma.order.update.mockResolvedValue({ ...preparingOrder, status: OrderStatus.READY_FOR_PICKUP, readyAt: new Date(), orderItems: [] });
+      mockPrisma.order.update.mockResolvedValue({
+        ...preparingOrder,
+        status: OrderStatus.READY_FOR_PICKUP,
+        readyAt: new Date(),
+        orderItems: [],
+      });
 
       const result = await kdsService.markOrderReady('o1');
       expect(result.status).toBe(OrderStatus.READY_FOR_PICKUP);
     });
 
     it('Stage 4 (COMPLETED): employee confirms pickup via completeOrder', async () => {
-      const readyOrder = { id: 'o1', pickupCode: '4082', status: OrderStatus.READY_FOR_PICKUP };
+      const readyOrder = {
+        id: 'o1',
+        pickupCode: '4082',
+        status: OrderStatus.READY_FOR_PICKUP,
+      };
       mockPrisma.order.findUnique.mockResolvedValue(readyOrder);
-      mockPrisma.order.update.mockResolvedValue({ ...readyOrder, status: OrderStatus.COMPLETED, completedAt: new Date() });
+      mockPrisma.order.update.mockResolvedValue({
+        ...readyOrder,
+        status: OrderStatus.COMPLETED,
+        completedAt: new Date(),
+      });
 
       const result = await ordersService.completeOrder('o1');
       expect(result.status).toBe(OrderStatus.COMPLETED);
       expect(mockPrisma.order.update).toHaveBeenCalledWith(
-        expect.objectContaining({ data: expect.objectContaining({ status: OrderStatus.COMPLETED }) }),
+        expect.objectContaining({
+          data: expect.objectContaining({ status: OrderStatus.COMPLETED }),
+        }),
       );
     });
 
     it('completeOrder throws BadRequestException if order is not READY_FOR_PICKUP', async () => {
-      mockPrisma.order.findUnique.mockResolvedValue({ id: 'o1', pickupCode: '0000', status: OrderStatus.SCHEDULED });
-      await expect(ordersService.completeOrder('o1')).rejects.toThrow(BadRequestException);
+      mockPrisma.order.findUnique.mockResolvedValue({
+        id: 'o1',
+        pickupCode: '0000',
+        status: OrderStatus.SCHEDULED,
+      });
+      await expect(ordersService.completeOrder('o1')).rejects.toThrow(
+        BadRequestException,
+      );
     });
   });
 
@@ -622,15 +807,33 @@ describe('[PRD §5 — Epic 5] Live Order Lifecycle', () => {
     });
 
     it('emits ORDER_READY_EVENT with orderId and pickupCode', async () => {
-      const preparing = { id: 'o1', pickupCode: '7777', userId: 'u1', slotId: 's1', pickupZone: PickupZone.SHELF_B, status: OrderStatus.PREPARING, slot: { startTime: new Date() }, user: { id: 'u1', employeeCode: 'E' } };
+      const preparing = {
+        id: 'o1',
+        pickupCode: '7777',
+        userId: 'u1',
+        slotId: 's1',
+        pickupZone: PickupZone.SHELF_B,
+        status: OrderStatus.PREPARING,
+        slot: { startTime: new Date() },
+        user: { id: 'u1', employeeCode: 'E' },
+      };
       mockPrisma.order.findUnique.mockResolvedValue(preparing);
-      mockPrisma.order.update.mockResolvedValue({ ...preparing, status: OrderStatus.READY_FOR_PICKUP, readyAt: new Date(), orderItems: [] });
+      mockPrisma.order.update.mockResolvedValue({
+        ...preparing,
+        status: OrderStatus.READY_FOR_PICKUP,
+        readyAt: new Date(),
+        orderItems: [],
+      });
 
       await kdsService.markOrderReady('o1');
 
       expect(mockEventEmitter.emit).toHaveBeenCalledWith(
         ORDER_READY_EVENT,
-        expect.objectContaining({ orderId: 'o1', pickupCode: '7777', pickupZone: PickupZone.SHELF_B }),
+        expect.objectContaining({
+          orderId: 'o1',
+          pickupCode: '7777',
+          pickupZone: PickupZone.SHELF_B,
+        }),
       );
     });
   });
@@ -652,9 +855,20 @@ describe('[PRD §6 — Epic 6] Cancellations & No-Show Protection', () => {
   describe('US-6.1: 15-minute modification cutoff', () => {
     it('allows cancellation > 15 mins before slot — isLateCancel=false', async () => {
       const slotStart = new Date(Date.now() + 30 * 60 * 1000); // 30 mins away
-      const order = { id: 'o1', pickupCode: '1234', status: OrderStatus.SCHEDULED, slotId: 's1', slot: { startTime: slotStart } };
+      const order = {
+        id: 'o1',
+        pickupCode: '1234',
+        status: OrderStatus.SCHEDULED,
+        slotId: 's1',
+        slot: { startTime: slotStart },
+      };
       mockPrisma.order.findUnique.mockResolvedValue(order);
-      mockPrisma.order.update.mockResolvedValue({ ...order, status: OrderStatus.CANCELLED, cancelledAt: new Date(), isLateCancel: false });
+      mockPrisma.order.update.mockResolvedValue({
+        ...order,
+        status: OrderStatus.CANCELLED,
+        cancelledAt: new Date(),
+        isLateCancel: false,
+      });
       mockPrisma.$executeRaw.mockResolvedValue(1);
 
       const result = await ordersService.cancelOrder('o1');
@@ -664,9 +878,20 @@ describe('[PRD §6 — Epic 6] Cancellations & No-Show Protection', () => {
 
     it('flags late cancellation within 15 minutes — isLateCancel=true', async () => {
       const slotStart = new Date(Date.now() + 10 * 60 * 1000); // 10 mins away (< 15 min cutoff)
-      const order = { id: 'o1', pickupCode: '5678', status: OrderStatus.SCHEDULED, slotId: 's1', slot: { startTime: slotStart } };
+      const order = {
+        id: 'o1',
+        pickupCode: '5678',
+        status: OrderStatus.SCHEDULED,
+        slotId: 's1',
+        slot: { startTime: slotStart },
+      };
       mockPrisma.order.findUnique.mockResolvedValue(order);
-      mockPrisma.order.update.mockResolvedValue({ ...order, status: OrderStatus.CANCELLED, cancelledAt: new Date(), isLateCancel: true });
+      mockPrisma.order.update.mockResolvedValue({
+        ...order,
+        status: OrderStatus.CANCELLED,
+        cancelledAt: new Date(),
+        isLateCancel: true,
+      });
       mockPrisma.$executeRaw.mockResolvedValue(1);
 
       const result = await ordersService.cancelOrder('o1');
@@ -675,9 +900,19 @@ describe('[PRD §6 — Epic 6] Cancellations & No-Show Protection', () => {
 
     it('cancellation atomically decrements slot bookedCount', async () => {
       const slotStart = new Date(Date.now() + 30 * 60 * 1000);
-      const order = { id: 'o1', pickupCode: '0000', status: OrderStatus.SCHEDULED, slotId: 's1', slot: { startTime: slotStart } };
+      const order = {
+        id: 'o1',
+        pickupCode: '0000',
+        status: OrderStatus.SCHEDULED,
+        slotId: 's1',
+        slot: { startTime: slotStart },
+      };
       mockPrisma.order.findUnique.mockResolvedValue(order);
-      mockPrisma.order.update.mockResolvedValue({ ...order, status: OrderStatus.CANCELLED, isLateCancel: false });
+      mockPrisma.order.update.mockResolvedValue({
+        ...order,
+        status: OrderStatus.CANCELLED,
+        isLateCancel: false,
+      });
       mockPrisma.$executeRaw.mockResolvedValue(1);
 
       await ordersService.cancelOrder('o1');
@@ -685,10 +920,18 @@ describe('[PRD §6 — Epic 6] Cancellations & No-Show Protection', () => {
     });
 
     it('rejects cancellation if order is not in SCHEDULED state', async () => {
-      const order = { id: 'o1', pickupCode: '0000', status: OrderStatus.PREPARING, slotId: 's1', slot: { startTime: new Date() } };
+      const order = {
+        id: 'o1',
+        pickupCode: '0000',
+        status: OrderStatus.PREPARING,
+        slotId: 's1',
+        slot: { startTime: new Date() },
+      };
       mockPrisma.order.findUnique.mockResolvedValue(order);
 
-      await expect(ordersService.cancelOrder('o1')).rejects.toThrow(BadRequestException);
+      await expect(ordersService.cancelOrder('o1')).rejects.toThrow(
+        BadRequestException,
+      );
     });
   });
 
@@ -737,8 +980,15 @@ describe('[PRD §6 — Epic 6] Cancellations & No-Show Protection', () => {
     });
 
     it('reminder emits order.reminder event when order is READY_FOR_PICKUP', async () => {
-      mockPrisma.order.findUnique.mockResolvedValue({ id: 'o1', pickupCode: '1111', userId: 'u1', status: OrderStatus.READY_FOR_PICKUP });
-      await expiryProcessor.process(makeJob({ orderId: 'o1' }, ORDER_REMINDER_JOB));
+      mockPrisma.order.findUnique.mockResolvedValue({
+        id: 'o1',
+        pickupCode: '1111',
+        userId: 'u1',
+        status: OrderStatus.READY_FOR_PICKUP,
+      });
+      await expiryProcessor.process(
+        makeJob({ orderId: 'o1' }, ORDER_REMINDER_JOB),
+      );
 
       expect(mockEventEmitter.emit).toHaveBeenCalledWith(
         ORDER_REMINDER_EVENT,
@@ -747,10 +997,21 @@ describe('[PRD §6 — Epic 6] Cancellations & No-Show Protection', () => {
     });
 
     it('expiry job transitions READY_FOR_PICKUP → EXPIRED after 30 min (US-6.2)', async () => {
-      mockPrisma.order.findUnique.mockResolvedValue({ id: 'o1', pickupCode: '2222', userId: 'u1', status: OrderStatus.READY_FOR_PICKUP });
-      mockPrisma.order.update.mockResolvedValue({ id: 'o1', pickupCode: '2222', status: OrderStatus.EXPIRED });
+      mockPrisma.order.findUnique.mockResolvedValue({
+        id: 'o1',
+        pickupCode: '2222',
+        userId: 'u1',
+        status: OrderStatus.READY_FOR_PICKUP,
+      });
+      mockPrisma.order.update.mockResolvedValue({
+        id: 'o1',
+        pickupCode: '2222',
+        status: OrderStatus.EXPIRED,
+      });
 
-      await expiryProcessor.process(makeJob({ orderId: 'o1' }, ORDER_EXPIRY_JOB));
+      await expiryProcessor.process(
+        makeJob({ orderId: 'o1' }, ORDER_EXPIRY_JOB),
+      );
 
       expect(mockPrisma.order.update).toHaveBeenCalledWith(
         expect.objectContaining({ data: { status: OrderStatus.EXPIRED } }),
@@ -762,8 +1023,14 @@ describe('[PRD §6 — Epic 6] Cancellations & No-Show Protection', () => {
     });
 
     it('expiry skips COMPLETED orders — employee already picked up (PRD §6 edge case)', async () => {
-      mockPrisma.order.findUnique.mockResolvedValue({ id: 'o1', pickupCode: '0000', status: OrderStatus.COMPLETED });
-      await expiryProcessor.process(makeJob({ orderId: 'o1' }, ORDER_EXPIRY_JOB));
+      mockPrisma.order.findUnique.mockResolvedValue({
+        id: 'o1',
+        pickupCode: '0000',
+        status: OrderStatus.COMPLETED,
+      });
+      await expiryProcessor.process(
+        makeJob({ orderId: 'o1' }, ORDER_EXPIRY_JOB),
+      );
 
       expect(mockPrisma.order.update).not.toHaveBeenCalled();
       expect(mockEventEmitter.emit).not.toHaveBeenCalled();
@@ -791,18 +1058,28 @@ describe('[PRD §5.3A] Atomic Slot Booking — Race Condition Prevention', () =>
     // 0 rows returned = another worker grabbed the last spot
     mockPrisma.$queryRaw.mockResolvedValue([]);
 
-    await expect(ordersService.createOrder(VALID_ORDER_DTO)).rejects.toThrow(ConflictException);
-    await expect(ordersService.createOrder(VALID_ORDER_DTO)).rejects.toThrow(/SLOT_FULL/);
+    await expect(ordersService.createOrder(VALID_ORDER_DTO)).rejects.toThrow(
+      ConflictException,
+    );
+    await expect(ordersService.createOrder(VALID_ORDER_DTO)).rejects.toThrow(
+      /SLOT_FULL/,
+    );
   });
 
   it('succeeds when atomic UPDATE returns 1 row (spot was available)', async () => {
     mockPrisma.user.findUnique.mockResolvedValue(USER);
     mockPrisma.menuItem.findMany.mockResolvedValue([MENU_ITEM]);
     mockPrisma.pickupSlot.findUnique.mockResolvedValue(SLOT_1H_FUTURE);
-    mockPrisma.$queryRaw.mockResolvedValue([{ id: SLOT_1H_FUTURE.id, booked_count: 6, max_capacity: 15 }]);
+    mockPrisma.$queryRaw.mockResolvedValue([
+      { id: SLOT_1H_FUTURE.id, booked_count: 6, max_capacity: 15 },
+    ]);
     mockPrisma.order.create.mockResolvedValue({
-      id: 'o-new', pickupCode: '8888', status: OrderStatus.SCHEDULED,
-      fireAt: new Date(), slot: { startTime: SLOT_1H_FUTURE.startTime }, orderItems: [],
+      id: 'o-new',
+      pickupCode: '8888',
+      status: OrderStatus.SCHEDULED,
+      fireAt: new Date(),
+      slot: { startTime: SLOT_1H_FUTURE.startTime },
+      orderItems: [],
     });
 
     const result = await ordersService.createOrder(VALID_ORDER_DTO);
@@ -813,10 +1090,16 @@ describe('[PRD §5.3A] Atomic Slot Booking — Race Condition Prevention', () =>
     mockPrisma.user.findUnique.mockResolvedValue(USER);
     mockPrisma.menuItem.findMany.mockResolvedValue([MENU_ITEM]);
     mockPrisma.pickupSlot.findUnique.mockResolvedValue(SLOT_1H_FUTURE);
-    mockPrisma.$queryRaw.mockResolvedValue([{ id: SLOT_1H_FUTURE.id, booked_count: 1, max_capacity: 15 }]);
+    mockPrisma.$queryRaw.mockResolvedValue([
+      { id: SLOT_1H_FUTURE.id, booked_count: 1, max_capacity: 15 },
+    ]);
     mockPrisma.order.create.mockResolvedValue({
-      id: 'o-tx', pickupCode: '7070', status: OrderStatus.SCHEDULED,
-      fireAt: new Date(), slot: { startTime: SLOT_1H_FUTURE.startTime }, orderItems: [],
+      id: 'o-tx',
+      pickupCode: '7070',
+      status: OrderStatus.SCHEDULED,
+      fireAt: new Date(),
+      slot: { startTime: SLOT_1H_FUTURE.startTime },
+      orderItems: [],
     });
 
     await ordersService.createOrder(VALID_ORDER_DTO);

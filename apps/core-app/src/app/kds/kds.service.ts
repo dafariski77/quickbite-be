@@ -72,7 +72,12 @@ export class KdsService {
     return slots.map((slot) => {
       const itemTotals: Record<
         string,
-        { menuItemId: string; name: string; category: string; totalQuantity: number }
+        {
+          menuItemId: string;
+          name: string;
+          category: string;
+          totalQuantity: number;
+        }
       > = {};
 
       for (const order of slot.orders) {
@@ -108,7 +113,10 @@ export class KdsService {
   async markOrderReady(orderId: string) {
     const order = await this.prisma.order.findUnique({
       where: { id: orderId },
-      include: { slot: true, user: { select: { id: true, employeeCode: true } } },
+      include: {
+        slot: true,
+        user: { select: { id: true, employeeCode: true } },
+      },
     });
 
     if (!order) {
@@ -165,14 +173,18 @@ export class KdsService {
 
     res.on('close', () => {
       this.kdsClients.delete(res);
-      this.logger.log(`KDS client disconnected. Total: ${this.kdsClients.size}`);
+      this.logger.log(
+        `KDS client disconnected. Total: ${this.kdsClients.size}`,
+      );
     });
   }
 
   /** Receives order.fired from JitFireProcessor and broadcasts to all KDS tablets. */
   @OnEvent(ORDER_FIRED_EVENT)
   handleOrderFired(event: OrderFiredEvent): void {
-    this.logger.log(`📺 Broadcasting ticket_fired to ${this.kdsClients.size} KDS client(s)`);
+    this.logger.log(
+      `📺 Broadcasting ticket_fired to ${this.kdsClients.size} KDS client(s)`,
+    );
     this.broadcastToKds('ticket_fired', event);
   }
 
@@ -184,13 +196,18 @@ export class KdsService {
   addOrderClient(orderId: string, res: Response): void {
     this.initSseHeaders(res);
 
-    if (!this.orderClients.has(orderId)) {
-      this.orderClients.set(orderId, new Set());
+    let clients = this.orderClients.get(orderId);
+    if (!clients) {
+      clients = new Set();
+      this.orderClients.set(orderId, clients);
     }
-    this.orderClients.get(orderId)!.add(res);
+    clients.add(res);
     this.logger.log(`iOS client connected for order ${orderId}`);
 
-    this.sendSseEvent(res, 'connected', { orderId, message: 'Order stream connected' });
+    this.sendSseEvent(res, 'connected', {
+      orderId,
+      message: 'Order stream connected',
+    });
 
     res.on('close', () => {
       this.orderClients.get(orderId)?.delete(res);
@@ -227,7 +244,11 @@ export class KdsService {
     }
   }
 
-  private broadcastToOrder(orderId: string, event: string, data: unknown): void {
+  private broadcastToOrder(
+    orderId: string,
+    event: string,
+    data: unknown,
+  ): void {
     const clients = this.orderClients.get(orderId);
     if (!clients) return;
     for (const client of clients) {

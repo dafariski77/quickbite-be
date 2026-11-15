@@ -1,6 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { NotFoundException, BadRequestException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import type { Response } from 'express';
 import { KdsService } from './kds.service';
 import { PrismaService, OrderStatus, PickupZone, Category } from '@micro/core';
 import { ORDER_READY_EVENT } from '../scheduler/events/order.events';
@@ -19,8 +20,16 @@ const mockEventEmitter = {
   emit: jest.fn(),
 };
 
+interface MockResponse {
+  setHeader: jest.Mock;
+  flushHeaders: jest.Mock;
+  write: jest.Mock;
+  on: jest.Mock;
+  _trigger: (event: string) => void;
+}
+
 // Minimal mock Express Response for SSE
-const makeMockRes = () => {
+const makeMockRes = (): Response & MockResponse => {
   const handlers: Record<string, () => void> = {};
   return {
     setHeader: jest.fn(),
@@ -30,7 +39,7 @@ const makeMockRes = () => {
       handlers[event] = handler;
     }),
     _trigger: (event: string) => handlers[event]?.(),
-  } as any;
+  } as unknown as Response & MockResponse;
 };
 
 const preparingOrder = {
@@ -77,12 +86,18 @@ describe('KdsService', () => {
                 {
                   menuItemId: 'item-1',
                   quantity: 2,
-                  menuItem: { name: 'Chicken Bowl', category: Category.HOT_MEAL },
+                  menuItem: {
+                    name: 'Chicken Bowl',
+                    category: Category.HOT_MEAL,
+                  },
                 },
                 {
                   menuItemId: 'item-2',
                   quantity: 1,
-                  menuItem: { name: 'Iced Latte', category: Category.COLD_DRINK },
+                  menuItem: {
+                    name: 'Iced Latte',
+                    category: Category.COLD_DRINK,
+                  },
                 },
               ],
             },
@@ -92,7 +107,10 @@ describe('KdsService', () => {
                 {
                   menuItemId: 'item-1',
                   quantity: 1,
-                  menuItem: { name: 'Chicken Bowl', category: Category.HOT_MEAL },
+                  menuItem: {
+                    name: 'Chicken Bowl',
+                    category: Category.HOT_MEAL,
+                  },
                 },
               ],
             },
@@ -106,7 +124,9 @@ describe('KdsService', () => {
       expect(result[0].slotId).toBe('slot-1');
       expect(result[0].totalOrders).toBe(2);
 
-      const chickenBowl = result[0].items.find((i) => i.name === 'Chicken Bowl');
+      const chickenBowl = result[0].items.find(
+        (i) => i.name === 'Chicken Bowl',
+      );
       const icedLatte = result[0].items.find((i) => i.name === 'Iced Latte');
 
       // 2 from first order + 1 from second order
@@ -147,7 +167,9 @@ describe('KdsService', () => {
       expect(mockPrismaService.order.update).toHaveBeenCalledWith(
         expect.objectContaining({
           where: { id: preparingOrder.id },
-          data: expect.objectContaining({ status: OrderStatus.READY_FOR_PICKUP }),
+          data: expect.objectContaining({
+            status: OrderStatus.READY_FOR_PICKUP,
+          }),
         }),
       );
 
@@ -165,7 +187,9 @@ describe('KdsService', () => {
     it('should throw NotFoundException if order does not exist', async () => {
       mockPrismaService.order.findUnique.mockResolvedValue(null);
 
-      await expect(service.markOrderReady('nonexistent')).rejects.toThrow(NotFoundException);
+      await expect(service.markOrderReady('nonexistent')).rejects.toThrow(
+        NotFoundException,
+      );
     });
 
     it('should throw BadRequestException if order is not in PREPARING state', async () => {
@@ -174,7 +198,9 @@ describe('KdsService', () => {
         status: OrderStatus.SCHEDULED,
       });
 
-      await expect(service.markOrderReady(preparingOrder.id)).rejects.toThrow(BadRequestException);
+      await expect(service.markOrderReady(preparingOrder.id)).rejects.toThrow(
+        BadRequestException,
+      );
     });
   });
 
@@ -185,7 +211,10 @@ describe('KdsService', () => {
       const res = makeMockRes();
       service.addKdsClient(res);
 
-      expect(res.setHeader).toHaveBeenCalledWith('Content-Type', 'text/event-stream');
+      expect(res.setHeader).toHaveBeenCalledWith(
+        'Content-Type',
+        'text/event-stream',
+      );
       expect(res.flushHeaders).toHaveBeenCalled();
       expect(res.write).toHaveBeenCalledWith(
         expect.stringContaining('event: connected'),

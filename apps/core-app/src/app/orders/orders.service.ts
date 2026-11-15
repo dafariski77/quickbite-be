@@ -48,7 +48,10 @@ export class OrdersService {
 
     // Validate stock and structured modifiers
     for (const itemDto of dto.items) {
-      const menuItem = menuItemsMap.get(itemDto.menuItemId)!;
+      const menuItem = menuItemsMap.get(itemDto.menuItemId);
+      if (!menuItem) {
+        throw new BadRequestException('One or more menu items are invalid');
+      }
 
       if (!menuItem.isAvailable) {
         throw new BadRequestException(
@@ -57,7 +60,8 @@ export class OrdersService {
       }
 
       // Validate modifiers against schema
-      const schema = (menuItem.modifiersSchema as unknown as ModifierSchemaItem[]) || [];
+      const schema =
+        (menuItem.modifiersSchema as unknown as ModifierSchemaItem[]) || [];
       const selected = itemDto.selectedModifiers || {};
 
       for (const modifier of schema) {
@@ -87,7 +91,9 @@ export class OrdersService {
       });
 
       if (!slot) {
-        throw new NotFoundException(`Pickup slot with ID ${dto.slotId} not found`);
+        throw new NotFoundException(
+          `Pickup slot with ID ${dto.slotId} not found`,
+        );
       }
 
       const leadBufferMs = 5 * 60 * 1000;
@@ -119,8 +125,8 @@ export class OrdersService {
       let primaryZone: PickupZone = PickupZone.SHELF_A;
 
       for (const itemDto of dto.items) {
-        const item = menuItemsMap.get(itemDto.menuItemId)!;
-        if (item.prepDurationMins > maxPrepDuration) {
+        const item = menuItemsMap.get(itemDto.menuItemId);
+        if (item && item.prepDurationMins > maxPrepDuration) {
           maxPrepDuration = item.prepDurationMins;
           primaryZone = item.pickupZone;
         }
@@ -171,8 +177,14 @@ export class OrdersService {
     // Enqueue JIT fire job and expiry jobs after the transaction succeeds
     // (outside the transaction so queue errors don't roll back the reservation)
     await Promise.all([
-      this.schedulerService.enqueueJitFireJob(createdOrder.id, createdOrder.fireAt),
-      this.schedulerService.enqueueExpiryJobs(createdOrder.id, createdOrder.slot.startTime),
+      this.schedulerService.enqueueJitFireJob(
+        createdOrder.id,
+        createdOrder.fireAt,
+      ),
+      this.schedulerService.enqueueExpiryJobs(
+        createdOrder.id,
+        createdOrder.slot.startTime,
+      ),
     ]);
 
     return createdOrder;
@@ -284,7 +296,9 @@ export class OrdersService {
    * Sets completedAt timestamp.
    */
   async completeOrder(orderId: string) {
-    const order = await this.prisma.order.findUnique({ where: { id: orderId } });
+    const order = await this.prisma.order.findUnique({
+      where: { id: orderId },
+    });
 
     if (!order) {
       throw new NotFoundException(`Order with ID ${orderId} not found`);
@@ -304,7 +318,9 @@ export class OrdersService {
       },
     });
 
-    this.logger.log(`🎉 Order #${order.pickupCode} marked COMPLETED by employee`);
+    this.logger.log(
+      `🎉 Order #${order.pickupCode} marked COMPLETED by employee`,
+    );
 
     return updated;
   }
