@@ -1,0 +1,25 @@
+{
+  "name": "@micro/core-app-e2e",
+  "version": "0.0.1",
+  "private": true,
+  "nx": {
+    "implicitDependencies": [
+      "@micro/core-app"
+    ],
+    "targets": {
+      "e2e": {
+        "command": "jest --passWithNoTests",
+        "outputs": [
+          "{projectRoot}/test-output/jest/coverage"
+        ],
+        "dependsOn": [
+          "@micro/core-app:build",
+          "@micro/core-app:serve"
+        ],
+        "options": {
+          "cwd": "apps/core-app-e2e"
+        }
+      }
+    }
+  }
+}

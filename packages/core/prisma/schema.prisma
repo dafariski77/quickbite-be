@@ -1,0 +1,117 @@
+datasource db {
+  provider = "postgresql"
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum Role {
+  EMPLOYEE
+  KITCHEN_STAFF
+  HEAD_OF_KITCHEN
+}
+
+enum Category {
+  HOT_MEAL
+  COLD_DRINK
+  SNACK
+}
+
+enum PickupZone {
+  SHELF_A
+  SHELF_B
+  DRINK_COUNTER
+}
+
+enum OrderStatus {
+  SCHEDULED
+  PREPARING
+  READY_FOR_PICKUP
+  COMPLETED
+  CANCELLED
+  EXPIRED
+}
+
+model User {
+  id              String   @id @default(uuid()) @db.Uuid
+  employeeCode    String   @unique @map("employee_code") @db.VarChar(32)
+  fullName        String   @map("full_name") @db.VarChar(120)
+  email           String   @unique @db.VarChar(160)
+  role            Role     @default(EMPLOYEE)
+  apnsDeviceToken String?  @map("apns_device_token") @db.Text
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt       DateTime @updatedAt @map("updated_at") @db.Timestamptz()
+
+  orders Order[]
+
+  @@map("users")
+}
+
+model MenuItem {
+  id               String     @id @default(uuid()) @db.Uuid
+  name             String     @db.VarChar(100)
+  category         Category
+  prepDurationMins Int        @default(5) @map("prep_duration_mins")
+  pickupZone       PickupZone @default(SHELF_A) @map("pickup_zone")
+  isAvailable      Boolean    @default(true) @map("is_available")
+  modifiersSchema  Json       @default("[]") @map("modifiers_schema")
+  createdAt        DateTime   @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt        DateTime   @updatedAt @map("updated_at") @db.Timestamptz()
+
+  orderItems OrderItem[]
+
+  @@map("menu_items")
+}
+
+model PickupSlot {
+  id          String   @id @default(uuid()) @db.Uuid
+  serviceDate DateTime @map("service_date") @db.Date
+  startTime   DateTime @map("start_time") @db.Timestamptz()
+  endTime     DateTime @map("end_time") @db.Timestamptz()
+  maxCapacity Int      @default(15) @map("max_capacity")
+  bookedCount Int      @default(0) @map("booked_count")
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz()
+
+  orders Order[]
+
+  @@unique([serviceDate, startTime])
+  @@map("pickup_slots")
+}
+
+model Order {
+  id           String      @id @default(uuid()) @db.Uuid
+  pickupCode   String      @map("pickup_code") @db.VarChar(6)
+  userId       String      @map("user_id") @db.Uuid
+  user         User        @relation(fields: [userId], references: [id])
+  slotId       String      @map("slot_id") @db.Uuid
+  slot         PickupSlot  @relation(fields: [slotId], references: [id])
+  status       OrderStatus @default(SCHEDULED)
+  fireAt       DateTime    @map("fire_at") @db.Timestamptz()
+  readyAt      DateTime?   @map("ready_at") @db.Timestamptz()
+  completedAt  DateTime?   @map("completed_at") @db.Timestamptz()
+  cancelledAt  DateTime?   @map("cancelled_at") @db.Timestamptz()
+  isLateCancel Boolean     @default(false) @map("is_late_cancel")
+  pickupZone   PickupZone  @default(SHELF_A) @map("pickup_zone")
+  createdAt    DateTime    @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt    DateTime    @updatedAt @map("updated_at") @db.Timestamptz()
+
+  orderItems OrderItem[]
+
+  @@index([status])
+  @@index([fireAt])
+  @@map("orders")
+}
+
+model OrderItem {
+  id                String   @id @default(uuid()) @db.Uuid
+  orderId           String   @map("order_id") @db.Uuid
+  order             Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  menuItemId        String   @map("menu_item_id") @db.Uuid
+  menuItem          MenuItem @relation(fields: [menuItemId], references: [id])
+  quantity          Int      @default(1)
+  selectedModifiers Json     @default("{}") @map("selected_modifiers")
+
+  @@map("order_items")
+}
