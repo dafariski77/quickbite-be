@@ -1,28 +1,97 @@
-version: '3.8'
+x-nest-base: &nest-base
+  restart: unless-stopped
+  networks:
+    - backend_net
+  security_opt:
+    - no-new-privileges:true
+  read_only: true
+  tmpfs:
+    - /tmp
 
 services:
-  postgres:
-    image: postgres:16-alpine
-    container_name: quickbite-postgres
-    restart: unless-stopped
+  api:
+    <<: *nest-base
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        APP_NAME: core-app
+    container_name: ${COMPOSE_PROJECT_NAME:-quickbite}_api
     ports:
-      - '5432:5432'
+      - "127.0.0.1:3007:3007"
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: quickbite
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
+      PORT: 3000
+      DATABASE_URL: postgresql://${POSTGRES_USER:-app_admin}:${POSTGRES_PASSWORD:-REPLACE_WITH_STRONG_GENERATED_PASSWORD}@postgres:5432/${POSTGRES_DB:-app_production}?schema=public
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-REPLACE_WITH_ANOTHER_STRONG_PASSWORD}
+      REDIS_URL: redis://:${REDIS_PASSWORD:-REPLACE_WITH_ANOTHER_STRONG_PASSWORD}@redis:6379/0
+      JWT_SECRET: ${JWT_SECRET:-quickbite-super-secret-key-change-in-production}
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: "0.5"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3007/api || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
 
-  redis:
-    image: redis:7-alpine
-    container_name: quickbite-redis
-    restart: unless-stopped
-    ports:
-      - '6379:6379'
-    volumes:
-      - redis_data:/data
+  # Note: Additional apps (e.g. admin, worker) can be enabled once created in apps/
+  # admin:
+  #   <<: *nest-base
+  #   build:
+  #     context: .
+  #     dockerfile: Dockerfile
+  #     args:
+  #       APP_NAME: admin
+  #   container_name: ${COMPOSE_PROJECT_NAME:-quickbite}_admin
+  #   ports:
+  #     - "127.0.0.1:3001:3001"
+  #   environment:
+  #     PORT: 3001
+  #     DATABASE_URL: postgresql://${POSTGRES_USER:-app_admin}:${POSTGRES_PASSWORD:-REPLACE_WITH_STRONG_GENERATED_PASSWORD}@postgres:5432/${POSTGRES_DB:-app_production}?schema=public
+  #     REDIS_HOST: redis
+  #     REDIS_PORT: 6379
+  #     REDIS_PASSWORD: ${REDIS_PASSWORD:-REPLACE_WITH_ANOTHER_STRONG_PASSWORD}
+  #     REDIS_URL: redis://:${REDIS_PASSWORD:-REPLACE_WITH_ANOTHER_STRONG_PASSWORD}@redis:6379/0
+  #     JWT_SECRET: ${JWT_SECRET:-quickbite-super-secret-key-change-in-production}
+  #   deploy:
+  #     resources:
+  #       limits:
+  #         memory: 512M
+  #         cpus: "0.5"
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3001/api || exit 1"]
+  #     interval: 15s
+  #     timeout: 5s
+  #     retries: 3
+  #     start_period: 10s
 
-volumes:
-  postgres_data:
-  redis_data:
+  # worker:
+  #   <<: *nest-base
+  #   build:
+  #     context: .
+  #     dockerfile: Dockerfile
+  #     args:
+  #       APP_NAME: worker
+  #   container_name: ${COMPOSE_PROJECT_NAME:-quickbite}_worker
+  #   environment:
+  #     DATABASE_URL: postgresql://${POSTGRES_USER:-app_admin}:${POSTGRES_PASSWORD:-REPLACE_WITH_STRONG_GENERATED_PASSWORD}@postgres:5432/${POSTGRES_DB:-app_production}?schema=public
+  #     REDIS_HOST: redis
+  #     REDIS_PORT: 6379
+  #     REDIS_PASSWORD: ${REDIS_PASSWORD:-REPLACE_WITH_ANOTHER_STRONG_PASSWORD}
+  #     REDIS_URL: redis://:${REDIS_PASSWORD:-REPLACE_WITH_ANOTHER_STRONG_PASSWORD}@redis:6379/0
+  #     JWT_SECRET: ${JWT_SECRET:-quickbite-super-secret-key-change-in-production}
+  #   deploy:
+  #     resources:
+  #       limits:
+  #         memory: 512M
+  #         cpus: "0.5"
+
+networks:
+  backend_net:
+    external: true
+    name: ${NETWORK_NAME:-quickbite_network}
