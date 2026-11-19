@@ -1,3 +1,5 @@
+name: ${COMPOSE_PROJECT_NAME:-quickbite}
+
 x-nest-base: &nest-base
   restart: unless-stopped
   networks:
@@ -18,14 +20,14 @@ services:
         APP_NAME: core-app
     container_name: ${COMPOSE_PROJECT_NAME:-quickbite}_api
     ports:
-      - "127.0.0.1:3007:3007"
+      - "${HOST_PORT:-127.0.0.1:3000}:3000"
     environment:
       PORT: 3000
-      DATABASE_URL: postgresql://${POSTGRES_USER:-app_admin}:${POSTGRES_PASSWORD:-REPLACE_WITH_STRONG_GENERATED_PASSWORD}@postgres:5432/${POSTGRES_DB:-app_production}?schema=public
-      REDIS_HOST: redis
-      REDIS_PORT: 6379
-      REDIS_PASSWORD: ${REDIS_PASSWORD:-REPLACE_WITH_ANOTHER_STRONG_PASSWORD}
-      REDIS_URL: redis://:${REDIS_PASSWORD:-REPLACE_WITH_ANOTHER_STRONG_PASSWORD}@redis:6379/0
+      DATABASE_URL: ${DATABASE_URL:-postgresql://app_admin:REPLACE_WITH_STRONG_GENERATED_PASSWORD@postgres:5432/app_production?schema=public}
+      REDIS_HOST: ${REDIS_HOST:-redis}
+      REDIS_PORT: ${REDIS_PORT:-6379}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      REDIS_URL: ${REDIS_URL:-}
       JWT_SECRET: ${JWT_SECRET:-quickbite-super-secret-key-change-in-production}
     deploy:
       resources:
@@ -33,43 +35,13 @@ services:
           memory: 512M
           cpus: "0.5"
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3007/api || exit 1"]
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/api || exit 1"]
       interval: 15s
       timeout: 5s
       retries: 3
       start_period: 10s
 
-  # Note: Additional apps (e.g. admin, worker) can be enabled once created in apps/
-  # admin:
-  #   <<: *nest-base
-  #   build:
-  #     context: .
-  #     dockerfile: Dockerfile
-  #     args:
-  #       APP_NAME: admin
-  #   container_name: ${COMPOSE_PROJECT_NAME:-quickbite}_admin
-  #   ports:
-  #     - "127.0.0.1:3001:3001"
-  #   environment:
-  #     PORT: 3001
-  #     DATABASE_URL: postgresql://${POSTGRES_USER:-app_admin}:${POSTGRES_PASSWORD:-REPLACE_WITH_STRONG_GENERATED_PASSWORD}@postgres:5432/${POSTGRES_DB:-app_production}?schema=public
-  #     REDIS_HOST: redis
-  #     REDIS_PORT: 6379
-  #     REDIS_PASSWORD: ${REDIS_PASSWORD:-REPLACE_WITH_ANOTHER_STRONG_PASSWORD}
-  #     REDIS_URL: redis://:${REDIS_PASSWORD:-REPLACE_WITH_ANOTHER_STRONG_PASSWORD}@redis:6379/0
-  #     JWT_SECRET: ${JWT_SECRET:-quickbite-super-secret-key-change-in-production}
-  #   deploy:
-  #     resources:
-  #       limits:
-  #         memory: 512M
-  #         cpus: "0.5"
-  #   healthcheck:
-  #     test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3001/api || exit 1"]
-  #     interval: 15s
-  #     timeout: 5s
-  #     retries: 3
-  #     start_period: 10s
-
+  # Additional microservices (e.g. worker, admin) can be enabled once created in apps/
   # worker:
   #   <<: *nest-base
   #   build:
@@ -79,17 +51,11 @@ services:
   #       APP_NAME: worker
   #   container_name: ${COMPOSE_PROJECT_NAME:-quickbite}_worker
   #   environment:
-  #     DATABASE_URL: postgresql://${POSTGRES_USER:-app_admin}:${POSTGRES_PASSWORD:-REPLACE_WITH_STRONG_GENERATED_PASSWORD}@postgres:5432/${POSTGRES_DB:-app_production}?schema=public
-  #     REDIS_HOST: redis
-  #     REDIS_PORT: 6379
-  #     REDIS_PASSWORD: ${REDIS_PASSWORD:-REPLACE_WITH_ANOTHER_STRONG_PASSWORD}
-  #     REDIS_URL: redis://:${REDIS_PASSWORD:-REPLACE_WITH_ANOTHER_STRONG_PASSWORD}@redis:6379/0
+  #     DATABASE_URL: ${DATABASE_URL}
+  #     REDIS_HOST: ${REDIS_HOST:-redis}
+  #     REDIS_PORT: ${REDIS_PORT:-6379}
+  #     REDIS_PASSWORD: ${REDIS_PASSWORD:-}
   #     JWT_SECRET: ${JWT_SECRET:-quickbite-super-secret-key-change-in-production}
-  #   deploy:
-  #     resources:
-  #       limits:
-  #         memory: 512M
-  #         cpus: "0.5"
 
 networks:
   backend_net:
